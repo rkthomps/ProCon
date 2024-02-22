@@ -16,7 +16,7 @@ case class WeightedProgram(
     if (weightCompare == 0) {
       return -1 * this.program.hashCode().compare(that.program.hashCode())
     }
-    return weightCompare 
+    return weightCompare
   }
 }
 
@@ -130,14 +130,14 @@ class ContinuousEnumerator(
     val oeManager: OEValuesManager,
     var task: SygusFileTask,
     val contexts: List[Map[String, Any]],
-    val probFn: ASTNode => Double,
+    val probFn: ASTNode => Double
 ) extends Iterator[ASTNode] {
 
   // Queue of Complete, but overlooked programs.
   val candidateQueue = PriorityQueue.empty[WeightedProgram]
   val subtermGenerators =
-    vocab.nodeMakers.map(m => RuleEnumerator(m, probFn, contexts)) ++ 
-    vocab.leavesMakers.map(m => RuleEnumerator(m, probFn, contexts))
+    vocab.nodeMakers.map(m => RuleEnumerator(m, probFn, contexts)) ++
+      vocab.leavesMakers.map(m => RuleEnumerator(m, probFn, contexts))
   loadQueue()
 
   override def hasNext: Boolean = 0 < candidateQueue.length
@@ -151,6 +151,17 @@ class ContinuousEnumerator(
     nextProg.program
   }
 
+  def queueable(
+      candidate: Option[RuleEnumeratorResult]
+  ): Option[WeightedProgram] = {
+    candidate match
+      case None => None
+      case Some(ruleEnumResult) =>
+        if (oeManager.isRepresentative(ruleEnumResult.weightedProgram.program))
+        then Some(ruleEnumResult.weightedProgram)
+        else None
+  }
+
   def loadQueue(): Unit = {
     var bestCandidate: Option[WeightedProgram] =
       if (0 < candidateQueue.length)
@@ -158,8 +169,9 @@ class ContinuousEnumerator(
       else None
     for (subtermGen <- subtermGenerators) {
       var curCandidate = subtermGen.nextProgram()
-      if (curCandidate.isDefined) {
-        candidateQueue += curCandidate.get.weightedProgram
+      val toQueue = queueable(curCandidate)
+      if (toQueue.isDefined) {
+        candidateQueue += toQueue.get
       }
       while (isConsiderable(curCandidate, bestCandidate)) {
         bestCandidate = Some(candidateQueue.head)
@@ -176,13 +188,13 @@ class ContinuousEnumerator(
       curBest: Option[WeightedProgram]
   ): Boolean = {
     scrutinee match
-      case None => false 
+      case None => false
       case Some(scrutineeProg) =>
         curBest match
           case None => false
           case Some(bestProg) =>
             if (scrutineeProg.subtermWeight < bestProg.weight)
-            then true 
-            else false 
+            then true
+            else false
   }
 }

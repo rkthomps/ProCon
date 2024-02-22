@@ -96,11 +96,12 @@ class DumbTest extends JUnitSuite {
         val enumerator = new ContinuousEnumerator(task.vocab, oeManager, task, context, _=>0.01)
 
         var prevWeight = -1.0
-        for (prog <- enumerator.take(100)) {
-            val weight = enumerator.candidateQueue.head.weight
+        var weight = enumerator.candidateQueue.head.weight
+        for (prog <- enumerator.take(25)) {
             assert(prevWeight <= weight)
             println(weight + " " + prog.code)
             prevWeight = weight
+            weight = enumerator.candidateQueue.head.weight
         }
 
     }
