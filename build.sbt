@@ -37,6 +37,7 @@ libraryDependencies += "commons-cli" % "commons-cli" % "1.4"
 //mainClass in (assembly) := Some("pcShell.ShellMain")
 Project.inConfig(Test)(baseAssemblySettings)
 Test / assembly / assemblyJarName := s"${name.value}-full.jar"
+//Test / javaOptions += "-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=5005"
 
 javaOptions += "-Xmx10G"
 //Anlr command line:

@@ -17,6 +17,11 @@ build/
 .scala_dependencies
 .cache
 .cache-main
+.bloop
+.bsp
+.metals
+.scalafmt.conf
+.vscode
 
 #general
 *.class
