@@ -18,7 +18,11 @@ object Main extends App {
   //"src/test/benchmarks/string/count-total-words-in-a-cell.sl"
   //"src/test/benchmarks/bitvec/1_10.sl"
   //"src/test/benchmarks/string/38871714.sl"
-  "src/test/benchmarks/string/exceljet1.sl"
+  //"src/test/benchmarks/string/exceljet1.sl"
+  //"src/test/benchmarks/easy/easy3.sl"
+  "src/test/benchmarks/string/phone-5.sl"
+  //"src/test/benchmarks/string/stackoverflow3.sl"
+  //"src/test/benchmarks/hackers-delight/hd-18.sl"
 
   case class RankedProgram(program: ASTNode, rank: Double) extends Ordered[RankedProgram] {
     override def compare(that: RankedProgram): Int = this.rank.compare(that.rank)
@@ -152,5 +156,6 @@ object Main extends App {
     else cegisTask(filename, sizeBased, probBased)
   }
 
-  synthesize(filename, true, true, false)
+  //synthesize(filename, true, true, false)
+  println(synthesize(filename, true, true, false).map(a => a.code).mkString("\n"))
 }

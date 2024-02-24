@@ -23,5 +23,7 @@ build/
 .scalafmt.conf
 .vscode
 
+motivating.txt
+
 #general
 *.class
