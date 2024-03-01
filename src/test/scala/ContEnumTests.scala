@@ -15,18 +15,8 @@ import scala.collection.mutable.ArrayBuffer
 import enumeration.ContinuousEnumerator
 import enumeration.{Enumerator, InputsValuesManager, OEValuesManager}
 
-
-class DumbTest extends JUnitSuite {
-    // Figure out how to write a test
-    @Test def testOnePlusOne: Unit = {
-        val j = 1
-        val k = 1
-        val l = j + k
-        assertEquals(l, 2)
-    }
-
-
-    // My own assertions about scala vocab.
+class ContEnumTests extends JUnitSuite {
+    // Assertions about scala vocab.
     @Test def testAssertions: Unit = {
         val grammar =
         """((ntInt Int (input))
