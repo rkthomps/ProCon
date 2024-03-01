@@ -28,6 +28,7 @@ class EnumeratorTests  extends JUnitSuite{
     assertEquals(4,vocab.leaves().size)
     assertEquals(3,vocab.nonLeaves().size)
     val enumerator = new Enumerator("", vocab, new OEValuesManager {
+      override def checkRepresentative(program: ASTNode): Boolean = true
       override def isRepresentative(program: ASTNode): Boolean = true
       override def clear(): Unit = {}
     }, new SygusFileTask(grammar), Map("input"->0) :: Nil)
@@ -165,6 +166,7 @@ class EnumeratorTests  extends JUnitSuite{
         SygusFileTask.makeVocabMaker(vocabElem, Types.withName(nonTerminal.sort().getText),nonTerminals))}.toList
     )
     val enumerator = new Enumerator("", vocab, new OEValuesManager {
+      override def checkRepresentative(program: ASTNode): Boolean = true
       override def isRepresentative(program: ASTNode): Boolean = true
       override def clear(): Unit = {}
     }, new SygusFileTask(grammar), Map.empty[String,AnyRef] :: Nil)

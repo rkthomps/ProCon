@@ -1,10 +1,12 @@
 package enumeration
 import ast.{ASTNode, VocabFactory, VocabMaker, Types}
-import sygus.SygusFileTask
+import enumeration.{Verifier, SMTVerifier, PBEVanillaVerifier, PBECegisVerifier, ProbabilityManager}
 import scala.collection.mutable.PriorityQueue
 import scala.collection.mutable.Queue
 import scala.collection.mutable.ArrayBuffer
 import scala.annotation.meta.getter
+import sygus.{Example, SMTProcess, SygusFileTask}
+import scala.collection.mutable.HashSet
 
 case class WeightedProgram(
     val weight: Double,
@@ -41,16 +43,19 @@ case class SubtermCandidate(
 
 class RuleEnumerator(
     val rule: VocabMaker,
-    val probFn: ASTNode => Double,
+    val probManager: ProbabilityManager,
     val contexts: List[Map[String, Any]]
 ) {
-
   val childQueues = rule.childTypes.map(_ => ArrayBuffer[WeightedProgram]())
+  val explored = HashSet[List[Int]]()
   val candidateQueue = {
     val terminalCandidate = getTerminalCandidate()
     terminalCandidate match
       case None                   => PriorityQueue.empty[SubtermCandidate]
-      case Some(subtermCandidate) => PriorityQueue(subtermCandidate)
+      case Some(subtermCandidate) => {
+        explored += subtermCandidate.indices
+        PriorityQueue(subtermCandidate)
+      }
   }
 
   def getTerminalCandidate(): Option[SubtermCandidate] = {
@@ -88,6 +93,7 @@ class RuleEnumerator(
         val newCandidate = getSubtermCandidate(insertIndices)
         if (newCandidate.isDefined) {
           candidateQueue += newCandidate.get
+          explored += insertIndices
         }
       }
     }
@@ -108,59 +114,124 @@ class RuleEnumerator(
       val nextCandidate = candidateQueue.dequeue()
       for (nextIndices <- getNextCandidateIndices(nextCandidate.indices)) {
         val nextCandidate = getSubtermCandidate(nextIndices)
-        if (nextCandidate.isDefined) {
+        if (nextCandidate.isDefined && !explored.contains(nextIndices)) {
           candidateQueue += nextCandidate.get
+          explored += nextIndices
         }
       }
-      val candidateProgram = rule.apply(nextCandidate.programs, contexts)
-      val candidateWeight =
-        -1 * math.log(probFn(candidateProgram)) + nextCandidate.weightSum
-      Some(
-        RuleEnumeratorResult(
-          WeightedProgram(candidateWeight, candidateProgram),
-          nextCandidate.weightSum
+      try {
+        val candidateProgram = rule.apply(nextCandidate.programs, contexts)
+        val candidateWeight =
+          -1 * math.log(probManager.scoreProg(candidateProgram)) + nextCandidate.weightSum
+        Some(
+          RuleEnumeratorResult(
+            WeightedProgram(candidateWeight, candidateProgram),
+            nextCandidate.weightSum
+          )
         )
-      )
+      } catch {
+        case e: ArithmeticException => None
+      }
     }
   }
 }
 
 class ContinuousEnumerator(
+    val filename: String,
     val vocab: VocabFactory,
     val oeManager: OEValuesManager,
     var task: SygusFileTask,
-    val contexts: List[Map[String, Any]],
-    val probFn: ASTNode => Double
+    var contexts: List[Map[String, Any]],
+    val cegis: Boolean,
+    val probManager: ProbabilityManager,
+    val timeout: Int,
 ) extends Iterator[ASTNode] {
 
   // Queue of Complete, but overlooked programs.
-  val candidateQueue = PriorityQueue.empty[WeightedProgram]
-  val subtermGenerators =
-    vocab.nodeMakers.map(m => RuleEnumerator(m, probFn, contexts)) ++
-      vocab.leavesMakers.map(m => RuleEnumerator(m, probFn, contexts))
+  var candidateQueue = PriorityQueue.empty[WeightedProgram]
+  var subtermGenerators =
+    vocab.nodeMakers.map(m => RuleEnumerator(m, probManager, contexts)) ++
+      vocab.leavesMakers.map(m => RuleEnumerator(m, probManager, contexts))
+  val startTime = System.currentTimeMillis()
+
+  val verifier = getVerifier()
   loadQueue()
+  println("Initial q len " + candidateQueue.length)
+
+  def restartEnumeration(): Unit = {
+    oeManager.clear()
+    subtermGenerators =
+      vocab.nodeMakers.map(m => RuleEnumerator(m, probManager, contexts)) ++
+        vocab.leavesMakers.map(m => RuleEnumerator(m, probManager, contexts))
+    candidateQueue = PriorityQueue.empty[WeightedProgram]
+    loadQueue()
+  }
+
+  def getVerifier(): Verifier = {
+    if task.isPBE
+        then if cegis 
+          then {
+            val pbeCegisVerifier = PBECegisVerifier(task.examples)
+            task.examples = List[Example]()
+            contexts = task.examples.map(_.input).toList
+            pbeCegisVerifier
+          }
+          else PBEVanillaVerifier()
+        else SMTVerifier(filename)
+  }
 
   override def hasNext: Boolean = 0 < candidateQueue.length
 
   override def next(): ASTNode = {
-    val nextProg = candidateQueue.dequeue()
+    var curProg = dequeueProgram()
+    var curTime = System.currentTimeMillis()
+
+    var numEnumerated = 1
+    while (!isSolutionCandidate(curProg.program)) {
+      //println(curProg.program.code + "Weight " + curProg.weight)
+      curProg = dequeueProgram()
+      numEnumerated += 1
+      if (timeout < ((curTime - startTime) / 1e3) && (20 < numEnumerated)) {
+        throw TimeoutException("Enumeration ran out of time.")
+      }
+      curTime = System.currentTimeMillis()
+    }
+    println(curProg.program.code + "; " + curProg.weight)
+    val cexOption = verifier.verify(curProg.program, task)
+    cexOption match
+      case None => {
+        curProg.program.unsat = true
+        curProg.program
+      }
+      case Some(counterExample) => {
+        task = task.updateContext(counterExample)
+        contexts = task.examples.map(_.input).toList
+        probManager.update(curProg.program, task)
+        restartEnumeration()
+        curProg.program
+      }
+  }
+
+  def dequeueProgram(): WeightedProgram = {
+    var nextProg = candidateQueue.dequeue()
+    while (0 < nextProg.program.values.length && !oeManager.isRepresentative(nextProg.program)) {
+      loadQueue()
+      nextProg = candidateQueue.dequeue()
+    }
+    loadQueue()
+    
     for (g <- subtermGenerators) {
       g.recieveProgram(nextProg)
     }
-    loadQueue()
-    nextProg.program
+    nextProg
   }
 
-  def queueable(
-      candidate: Option[RuleEnumeratorResult]
-  ): Option[WeightedProgram] = {
-    candidate match
-      case None => None
-      case Some(ruleEnumResult) =>
-        if (oeManager.isRepresentative(ruleEnumResult.weightedProgram.program))
-        then Some(ruleEnumResult.weightedProgram)
-        else None
+  def isSolutionCandidate(program: ASTNode): Boolean = {
+    if (program.nodeType == task.functionReturnType)
+      then task.examples.zip(program.values).map((exp, act) => exp.output == act).forall(identity)
+      else false
   }
+
 
   def loadQueue(): Unit = {
     var bestCandidate: Option[WeightedProgram] =
@@ -169,19 +240,33 @@ class ContinuousEnumerator(
       else None
     for (subtermGen <- subtermGenerators) {
       var curCandidate = subtermGen.nextProgram()
-      val toQueue = queueable(curCandidate)
+      val toQueue = queueable(curCandidate) 
       if (toQueue.isDefined) {
         candidateQueue += toQueue.get
       }
       while (isConsiderable(curCandidate, bestCandidate)) {
         bestCandidate = Some(candidateQueue.head)
         curCandidate = subtermGen.nextProgram()
-        if (curCandidate.isDefined) {
-          candidateQueue += curCandidate.get.weightedProgram
+        val toQueue = queueable(curCandidate)
+        if (toQueue.isDefined) {
+          candidateQueue += toQueue.get
         }
       }
     }
   }
+
+  def queueable(
+      candidate: Option[RuleEnumeratorResult]
+  ): Option[WeightedProgram] = {
+    candidate match
+      case None => None
+      case Some(ruleEnumResult) => {
+        if (oeManager.checkRepresentative(ruleEnumResult.weightedProgram.program))
+          then Some(ruleEnumResult.weightedProgram)
+          else None
+      }
+  }
+
 
   def isConsiderable(
       scrutinee: Option[RuleEnumeratorResult],
@@ -192,9 +277,13 @@ class ContinuousEnumerator(
       case Some(scrutineeProg) =>
         curBest match
           case None => false
-          case Some(bestProg) =>
-            if (scrutineeProg.subtermWeight < bestProg.weight)
+          case Some(bestProg) => {
+            val minPossibleWeight = -1 * math.log(probManager.lowerBoundProb())
+            if (scrutineeProg.subtermWeight + minPossibleWeight < bestProg.weight)
             then true
             else false
+          }
   }
 }
+
+class TimeoutException (val s: String) extends Exception(s) {}

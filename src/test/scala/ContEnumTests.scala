@@ -13,7 +13,7 @@ import ast.Types.Bool
 import ast.VocabMaker
 import scala.collection.mutable.ArrayBuffer
 import enumeration.ContinuousEnumerator
-import enumeration.{Enumerator, InputsValuesManager, OEValuesManager}
+import enumeration.{Enumerator, InputsValuesManager, OEValuesManager, ConstantProbManager, ProbeProbManager}
 
 class ContEnumTests extends JUnitSuite {
     // Assertions about scala vocab.
@@ -43,56 +43,31 @@ class ContEnumTests extends JUnitSuite {
     }
 
     @Test def testContEnum: Unit = {
-        val grammar =
-         """|(set-logic SLIA)
-            |(synth-fun f ((name String)) String
-            |    ((Start String (ntString))
-            |     (ntString String (name " " "."
-            |(str.++ ntString ntString)
-            |(str.replace ntString ntString ntString)
-            |(str.at ntString ntInt)
-            |(int.to.str ntInt)
-            |(ite ntBool ntString ntString)
-            |(str.substr ntString ntInt ntInt)
-            |))
-            |      (ntInt Int (0 1 2
-            |(+ ntInt ntInt)
-            |(- ntInt ntInt)
-            |(str.len ntString)
-            |(str.to.int ntString)
-            |(str.indexof ntString ntString ntInt)
-            |))
-            |(ntBool Bool (true false
-            |(= ntInt ntInt)
-            |(str.prefixof ntString ntString)
-            |(str.suffixof ntString ntString)
-            |(str.contains ntString ntString)
-            |))
-            |))
-            |(constraint (= (f "Nancy FreeHafer") "N.F."))
-            |(constraint (= (f "Andrew Cencici") "A.C."))
-            |(constraint (= (f "Jan Kotas") "J.K."))
-            |(constraint (= (f "Mariya Sergienko") "M.S."))
-            |
-            |(check-synth)
-          """.stripMargin
-        val task = new SygusFileTask(grammar)
+        //val testFile = "src/test/benchmarks/easy/easy1.sl"
+        //val testFile = "src/test/benchmarks/easy/easy2.sl"
+        //val testFile = "src/test/benchmarks/easy/easy3.sl"
+        val testFile = "src/test/benchmarks/string/phone-5.sl"
+        //val testFile = "src/test/benchmarks/string/stackoverflow10.sl"
+        //val testFile = "src/test/benchmarks/string/stackoverflow3.sl"
+        //val testFile = "src/test/benchmarks/hackers-delight/hd-18.sl"
+        val fileContents = scala.io.Source.fromFile(testFile).mkString
+        val task = new SygusFileTask(fileContents)
 
-        val oeManager = new OEValuesManager {
-            override def isRepresentative(program: ASTNode): Boolean = true
-            override def clear(): Unit = {}
-        }
+        val oeManager = InputsValuesManager()
         val context = task.examples.map(_.input).toList
-        val enumerator = new ContinuousEnumerator(task.vocab, oeManager, task, context, _=>0.01)
+        //val probManager = ConstantProbManager(0.1)
+        val probManager = ProbeProbManager(task)
+        val enumerator = new ContinuousEnumerator(testFile, task.vocab, oeManager, task, context, false, probManager, 60)
 
         var prevWeight = -1.0
         var weight = enumerator.candidateQueue.head.weight
-        for (prog <- enumerator.take(25)) {
-            assert(prevWeight <= weight)
-            println(weight + " " + prog.code)
-            prevWeight = weight
-            weight = enumerator.candidateQueue.head.weight
+        var curProg = enumerator.next()
+        while (!curProg.unsat && enumerator.hasNext) {
+            curProg = enumerator.next()
         }
-
+        if (curProg.unsat) {
+            println("FOUND!!!")
+            println(curProg.code)
+        }
     }
 }
