@@ -6,7 +6,9 @@ import scala.collection.mutable.Queue
 import scala.collection.mutable.ArrayBuffer
 import scala.annotation.meta.getter
 import sygus.{Example, SMTProcess, SygusFileTask}
-import scala.collection.mutable.HashSet
+import scala.collection.mutable
+
+var fitsMap = mutable.Map[(Class[_], Option[Any]), Double]()
 
 case class WeightedProgram(
     val weight: Double,
@@ -47,7 +49,7 @@ class RuleEnumerator(
     val contexts: List[Map[String, Any]]
 ) {
   val childQueues = rule.childTypes.map(_ => ArrayBuffer[WeightedProgram]())
-  val explored = HashSet[List[Int]]()
+  val explored = mutable.HashSet[List[Int]]()
   val candidateQueue = {
     val terminalCandidate = getTerminalCandidate()
     terminalCandidate match
@@ -160,6 +162,7 @@ class ContinuousEnumerator(
 
   def restartEnumeration(): Unit = {
     oeManager.clear()
+    fitsMap.clear()
     subtermGenerators =
       vocab.nodeMakers.map(m => RuleEnumerator(m, probManager, contexts)) ++
         vocab.leavesMakers.map(m => RuleEnumerator(m, probManager, contexts))
@@ -206,7 +209,7 @@ class ContinuousEnumerator(
       case Some(counterExample) => {
         task = task.updateContext(counterExample)
         contexts = task.examples.map(_.input).toList
-        probManager.update(curProg.program, task)
+        fitsMap = ProbUpdate.update(fitsMap, ArrayBuffer(curProg.program), task)
         restartEnumeration()
         curProg.program
       }

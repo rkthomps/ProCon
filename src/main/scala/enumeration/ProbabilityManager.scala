@@ -13,7 +13,6 @@ trait ProbabilityManager {
 class ConstantProbManager (val prob: Double) extends ProbabilityManager {
   def scoreProg(prog: ASTNode): Double = prob 
   def update(prog: ASTNode, task: SygusFileTask): Unit = {}
-
   def lowerBoundProb(): Double = prob 
 }
 
@@ -35,11 +34,7 @@ class ProbeProbManager(val task: SygusFileTask) extends ProbabilityManager {
     }
   }
 
-  def update(prog: ASTNode, task: SygusFileTask): Unit = {
-    val examplesPassed = task.fitExs(prog)
-    ProbUpdate.cache += (prog.code -> examplesPassed.toList.length)
-    ProbUpdate.readjustCosts(task)
-  }
+  def update(prog: ASTNode, task: SygusFileTask): Unit = {} // Using ProbUpdate's update function currently
 
   def lowerBoundProb(): Double = ProbUpdate.probMap.values.min // Could make more fine grained
 }
