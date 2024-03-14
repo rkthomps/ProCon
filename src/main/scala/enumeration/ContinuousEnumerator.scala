@@ -48,6 +48,8 @@ class RuleEnumerator(
 ) {
   val childQueues = rule.childTypes.map(_ => ArrayBuffer[WeightedProgram]())
   val explored = HashSet[List[Int]]()
+  var idxArr = Array.ofDim[Int](rule.childTypes.length)
+
   val candidateQueue = {
     val terminalCandidate = getTerminalCandidate()
     terminalCandidate match
@@ -107,33 +109,53 @@ class RuleEnumerator(
     curIndices.zipWithIndex.map((_, i) => tickAtIdx(curIndices, i))
   }
 
+  def candidateToResult(candidate: SubtermCandidate): Option[RuleEnumeratorResult] = {
+    try {
+      val candidateProgram = rule.apply(candidate.programs, contexts)
+      val candidateWeight =
+        -1 * math.log(probManager.scoreProg(candidateProgram)) + candidate.weightSum
+      Some(
+        RuleEnumeratorResult(
+          WeightedProgram(candidateWeight, candidateProgram),
+          candidate.weightSum
+        )
+      )
+    } catch {
+      case e: ArithmeticException => None
+    }
+}
+
+  def peek(): Option[RuleEnumeratorResult] = {
+    if (0 < candidateQueue.length)
+      then {
+      val nextCandidate = candidateQueue.head
+      candidateToResult(nextCandidate) match
+        case Some(result) => Some(result)
+        case None => {
+          candidateQueue.dequeue()
+          peek()
+        }
+      }
+      else None
+  }
+
   def nextProgram(): Option[RuleEnumeratorResult] = {
-    if (candidateQueue.length == 0)
-    then None
-    else {
-      val nextCandidate = candidateQueue.dequeue()
-      for (nextIndices <- getNextCandidateIndices(nextCandidate.indices)) {
+    if (0 < candidateQueue.length)
+    then {
+      val retCandidate = candidateQueue.dequeue()
+      for (nextIndices <- getNextCandidateIndices(retCandidate.indices)) {
         val nextCandidate = getSubtermCandidate(nextIndices)
         if (nextCandidate.isDefined && !explored.contains(nextIndices)) {
           candidateQueue += nextCandidate.get
           explored += nextIndices
         }
       }
-      try {
-        val candidateProgram = rule.apply(nextCandidate.programs, contexts)
-        val candidateWeight =
-          -1 * math.log(probManager.scoreProg(candidateProgram)) + nextCandidate.weightSum
-        Some(
-          RuleEnumeratorResult(
-            WeightedProgram(candidateWeight, candidateProgram),
-            nextCandidate.weightSum
-          )
-        )
-      } catch {
-        case e: ArithmeticException => None
-      }
+      candidateToResult(retCandidate)
     }
+    else
+      None
   }
+
 }
 
 class ContinuousEnumerator(
@@ -148,6 +170,11 @@ class ContinuousEnumerator(
 ) extends Iterator[ASTNode] {
 
   // Queue of Complete, but overlooked programs.
+  var numEnumerated = 0
+  var qTime = 0.0
+  var recTime = 0.0
+  var nextProgTime = 0.0
+
   var candidateQueue = PriorityQueue.empty[WeightedProgram]
   var subtermGenerators =
     vocab.nodeMakers.map(m => RuleEnumerator(m, probManager, contexts)) ++
@@ -160,6 +187,9 @@ class ContinuousEnumerator(
 
   def restartEnumeration(): Unit = {
     oeManager.clear()
+    println("Q len " + candidateQueue.length)
+    println("In restart")
+    probManager.reset(task)
     subtermGenerators =
       vocab.nodeMakers.map(m => RuleEnumerator(m, probManager, contexts)) ++
         vocab.leavesMakers.map(m => RuleEnumerator(m, probManager, contexts))
@@ -184,13 +214,20 @@ class ContinuousEnumerator(
 
   override def next(): ASTNode = {
     var curProg = dequeueProgram()
+    numEnumerated += 1
     var curTime = System.currentTimeMillis()
 
-    var numEnumerated = 1
     while (!isSolutionCandidate(curProg.program)) {
       //println(curProg.program.code + "Weight " + curProg.weight)
       curProg = dequeueProgram()
       numEnumerated += 1
+      if (numEnumerated % 10000 == 0) {
+        println("Candidate len: " ++ candidateQueue.length.toString())
+        println("num enum: " ++ numEnumerated.toString())
+        println("qtime: " ++ (qTime / 1e3).toString())
+        println("rectime: " ++ (recTime / 1e3).toString())
+        println("nextprog: " ++ (nextProgTime / 1e3).toString())
+      }
       if (timeout < ((curTime - startTime) / 1e3) && (20 < numEnumerated)) {
         throw TimeoutException("Enumeration ran out of time.")
       }
@@ -206,7 +243,6 @@ class ContinuousEnumerator(
       case Some(counterExample) => {
         task = task.updateContext(counterExample)
         contexts = task.examples.map(_.input).toList
-        probManager.update(curProg.program, task)
         restartEnumeration()
         curProg.program
       }
@@ -214,15 +250,27 @@ class ContinuousEnumerator(
 
   def dequeueProgram(): WeightedProgram = {
     var nextProg = candidateQueue.dequeue()
+    val start = System.currentTimeMillis()
     while (0 < nextProg.program.values.length && !oeManager.isRepresentative(nextProg.program)) {
       loadQueue()
       nextProg = candidateQueue.dequeue()
     }
     loadQueue()
+    val end = System.currentTimeMillis()
+    qTime += (end - start)
+
+    val shouldReset = probManager.update(nextProg, task)
+    if (shouldReset) {
+      restartEnumeration()
+      dequeueProgram()
+    }
     
+    val startr = System.currentTimeMillis()
     for (g <- subtermGenerators) {
       g.recieveProgram(nextProg)
     }
+    val endr = System.currentTimeMillis()
+    recTime += (endr - startr)
     nextProg
   }
 
@@ -239,18 +287,18 @@ class ContinuousEnumerator(
       then Some(candidateQueue.head)
       else None
     for (subtermGen <- subtermGenerators) {
-      var curCandidate = subtermGen.nextProgram()
-      val toQueue = queueable(curCandidate) 
-      if (toQueue.isDefined) {
-        candidateQueue += toQueue.get
-      }
-      while (isConsiderable(curCandidate, bestCandidate)) {
-        bestCandidate = Some(candidateQueue.head)
-        curCandidate = subtermGen.nextProgram()
-        val toQueue = queueable(curCandidate)
+      var curCandidate = subtermGen.peek()
+      while (isConsiderable(curCandidate, bestCandidate, subtermGen.rule.nodeType)) {
+        val start = System.currentTimeMillis()
+        var concreteCandidate = subtermGen.nextProgram()
+        val end = System.currentTimeMillis()
+        nextProgTime += (end - start)
+        val toQueue = queueable(concreteCandidate)
         if (toQueue.isDefined) {
           candidateQueue += toQueue.get
+          bestCandidate = Some(candidateQueue.head)
         }
+        curCandidate = subtermGen.peek()
       }
     }
   }
@@ -263,22 +311,23 @@ class ContinuousEnumerator(
       case Some(ruleEnumResult) => {
         if (oeManager.checkRepresentative(ruleEnumResult.weightedProgram.program))
           then Some(ruleEnumResult.weightedProgram)
-          else None
+          else None 
       }
   }
 
 
   def isConsiderable(
       scrutinee: Option[RuleEnumeratorResult],
-      curBest: Option[WeightedProgram]
+      curBest: Option[WeightedProgram],
+      headType: Class[? <: ASTNode],
   ): Boolean = {
     scrutinee match
       case None => false
       case Some(scrutineeProg) =>
         curBest match
-          case None => false
+          case None => true 
           case Some(bestProg) => {
-            val minPossibleWeight = -1 * math.log(probManager.lowerBoundProb())
+            val minPossibleWeight = -1 * math.log(probManager.lowerBoundProb(headType))
             if (scrutineeProg.subtermWeight + minPossibleWeight < bestProg.weight)
             then true
             else false

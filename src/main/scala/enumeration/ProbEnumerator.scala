@@ -38,6 +38,7 @@ class ProbEnumerator(val filename: String, val vocab: VocabFactory, val oeManage
   val source = scala.io.Source.fromFile(filename)
   var cegis = false
   var count = 0
+  var numEnumerated = 0
   val totalLeaves = vocab.leaves().toList.distinct ++ vocab.nonLeaves().toList.distinct
   var childrenIterator: Iterator[List[ASTNode]] = null
   var currLevelProgs: mutable.ArrayBuffer[ASTNode] = mutable.ArrayBuffer()
@@ -69,6 +70,8 @@ class ProbEnumerator(val filename: String, val vocab: VocabFactory, val oeManage
     fitsMap.clear()
     phaseCounter = 0
     costLevel = 0
+    println("ProbEnum: Resetting enumeration")
+    println(ProbUpdate.probMap.values.toString())
   }
 
   def resetCache(): Unit = {
@@ -117,6 +120,7 @@ class ProbEnumerator(val filename: String, val vocab: VocabFactory, val oeManage
     for (p <- currLevelProgs) updateBank(p)
  
     if (probBased) {
+      println("Num progs: " ++ currLevelProgs.length.toString())
       if (!currLevelProgs.isEmpty) fitsMap = ProbUpdate.update(fitsMap, currLevelProgs, task)
       if (phaseCounter == 2 * timeout) {
         phaseCounter = 0
@@ -154,6 +158,10 @@ class ProbEnumerator(val filename: String, val vocab: VocabFactory, val oeManage
       }
     }
     currLevelProgs += res.get
+    numEnumerated += 1
+    if (numEnumerated % 10000 == 0) {
+      println("Num enum" + numEnumerated.toString())
+    }
     /** CEGIS Loop - If the current program satisfies the list of examples, CVC4 is invoked after converting
       * SyGuS to SMTLib format. If the solver outputs sat, the counterexample returned is added to the list
       * of examples and synthesis restarts.
@@ -161,8 +169,7 @@ class ProbEnumerator(val filename: String, val vocab: VocabFactory, val oeManage
 
     if (!res.isEmpty && !task.isPBE && (res.get.nodeType == task.functionReturnType)) {
       if (contexts.isEmpty ||
-        (!contexts.isEmpty && task.examples.zip(res.get.values).map(pair => pair._1.output == pair._2).forall(identity))) {
-        //Solver is invoked if either the set of examples is empty or the program satisfies all current examples.
+        (!contexts.isEmpty && task.examples.zip(res.get.values).map(pair => pair._1.output == pair._2).forall(identity))) {        //Solver is invoked if either the set of examples is empty or the program satisfies all current examples.
         val query = SMTProcess.getquery(res.get.code, smtOut)
         val solverOut = SMTProcess.invokeCVC(query.stripMargin, SMTProcess.cvc4_Smt)
         if (solverOut.head == "sat") { // counterexample added!

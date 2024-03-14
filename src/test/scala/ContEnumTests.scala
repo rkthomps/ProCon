@@ -46,9 +46,9 @@ class ContEnumTests extends JUnitSuite {
         //val testFile = "src/test/benchmarks/easy/easy1.sl"
         //val testFile = "src/test/benchmarks/easy/easy2.sl"
         //val testFile = "src/test/benchmarks/easy/easy3.sl"
-        val testFile = "src/test/benchmarks/string/phone-5.sl"
+        //val testFile = "src/test/benchmarks/string/phone-5.sl"
         //val testFile = "src/test/benchmarks/string/stackoverflow10.sl"
-        //val testFile = "src/test/benchmarks/string/stackoverflow3.sl"
+        val testFile = "src/test/benchmarks/string/stackoverflow3.sl"
         //val testFile = "src/test/benchmarks/hackers-delight/hd-18.sl"
         val fileContents = scala.io.Source.fromFile(testFile).mkString
         val task = new SygusFileTask(fileContents)
@@ -56,11 +56,11 @@ class ContEnumTests extends JUnitSuite {
         val oeManager = InputsValuesManager()
         val context = task.examples.map(_.input).toList
         //val probManager = ConstantProbManager(0.1)
-        val probManager = ProbeProbManager(task)
-        val enumerator = new ContinuousEnumerator(testFile, task.vocab, oeManager, task, context, false, probManager, 60)
+        val probManager = ProbeProbManager(task, 1024) 
+        val enumerator = new ContinuousEnumerator(testFile, task.vocab, oeManager, task, context, false, probManager, 20)
 
         var prevWeight = -1.0
-        var weight = enumerator.candidateQueue.head.weight
+        //var weight = enumerator.candidateQueue.head.weight
         var curProg = enumerator.next()
         while (!curProg.unsat && enumerator.hasNext) {
             curProg = enumerator.next()

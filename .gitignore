@@ -24,6 +24,7 @@ build/
 .vscode
 
 motivating.txt
+remember.txt
 
 #general
 *.class

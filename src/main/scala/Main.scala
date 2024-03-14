@@ -20,9 +20,10 @@ object Main extends App {
   //"src/test/benchmarks/string/38871714.sl"
   //"src/test/benchmarks/string/exceljet1.sl"
   //"src/test/benchmarks/easy/easy3.sl"
-  "src/test/benchmarks/string/phone-5.sl"
+  //"src/test/benchmarks/string/phone-5.sl"
   //"src/test/benchmarks/string/stackoverflow3.sl"
-  //"src/test/benchmarks/hackers-delight/hd-18.sl"
+  //"src/test/benchmarks/string/stackoverflow10.sl"
+  "src/test/benchmarks/hackers-delight/hd-18.sl"
 
   case class RankedProgram(program: ASTNode, rank: Double) extends Ordered[RankedProgram] {
     override def compare(that: RankedProgram): Int = this.rank.compare(that.rank)

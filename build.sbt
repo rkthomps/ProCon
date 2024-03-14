@@ -2,7 +2,7 @@ name := "probe"
 
 version := "0.1"
 
-scalaVersion := "3.2.2"
+scalaVersion := "3.3.1"
 
 // https://mvnrepository.com/artifact/jline/jline
 libraryDependencies += "jline" % "jline" % "2.14.6"
@@ -33,6 +33,10 @@ libraryDependencies += "io.spray" %% "spray-json" % "1.3.6"
 
 // https://mvnrepository.com/artifact/commons-cli/commons-cli
 libraryDependencies += "commons-cli" % "commons-cli" % "1.4"
+
+libraryDependencies += "com.google.code.findbugs" % "jsr305" % "3.0.2" 
+
+
 
 //mainClass in (assembly) := Some("pcShell.ShellMain")
 Project.inConfig(Test)(baseAssemblySettings)
