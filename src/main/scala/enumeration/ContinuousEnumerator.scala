@@ -27,8 +27,15 @@ case class RuleEnumeratorResult(
     val subtermWeight: Double
 )
 
+case class PartialCandidate(
+    indices: List[Int],
+    permissions: List[Boolean],
+    programs: List[Option[WeightedProgram]],
+) 
+
 case class SubtermCandidate(
     indices: List[Int],
+    permissions: List[Boolean],
     programs: List[ASTNode],
     weightSum: Double
 ) extends Ordered[SubtermCandidate] {
@@ -47,41 +54,42 @@ class RuleEnumerator(
     val contexts: List[Map[String, Any]]
 ) {
   val childQueues = rule.childTypes.map(_ => ArrayBuffer[WeightedProgram]())
-  val explored = HashSet[List[Int]]()
-  var idxArr = Array.ofDim[Int](rule.childTypes.length)
+  val zeroList = List.fill(rule.childTypes.length)(0)
+  val completePermissions = List.fill(rule.childTypes.length)(true)
+  val noneList = List.fill[Option[WeightedProgram]](rule.childTypes.length)(None)
+  val partialCandidates = ArrayBuffer[PartialCandidate](PartialCandidate(zeroList, completePermissions, noneList))
+  val candidateQueue = PriorityQueue.empty[SubtermCandidate]
 
-  val candidateQueue = {
-    val terminalCandidate = getTerminalCandidate()
-    terminalCandidate match
-      case None                   => PriorityQueue.empty[SubtermCandidate]
-      case Some(subtermCandidate) => {
-        explored += subtermCandidate.indices
-        PriorityQueue(subtermCandidate)
-      }
-  }
+  // handle terminals
 
-  def getTerminalCandidate(): Option[SubtermCandidate] = {
-    if (rule.childTypes.length == 0)
-    then Some(SubtermCandidate(List[Int](), List[ASTNode](), 0.0))
-    else None
-  }
+  // val candidateQueue = {
+  //   val terminalCandidate = getTerminalCandidate()
+  //   terminalCandidate match
+  //     case None                   => PriorityQueue.empty[SubtermCandidate]
+  //     case Some(subtermCandidate) => {
+  //       PriorityQueue(subtermCandidate)
+  //     }
+  // }
 
-  def getStartIndices(qIndex: Int, qLen: Int, numChildren: Int): List[Int] = {
-    val prefix = List.fill(qIndex)(0)
-    val suffix = List.fill(numChildren - qIndex - 1)(0)
-    return prefix ++ (qLen - 1 :: suffix)
-  }
+  // def getTerminalCandidate(): Option[SubtermCandidate] = {
+  //   if (rule.childTypes.length == 0)
+  //   then Some(SubtermCandidate(List[Int](), List[Boolean](), List[ASTNode](), 0.0))
+  //   else None
+  // }
 
-  def getSubtermCandidate(
-      subtermIndices: List[Int]
-  ): Option[SubtermCandidate] = {
-    if (subtermIndices.zip(childQueues).forall((i, q) => i < q.length))
-    then {
-      val weightedPrograms = subtermIndices.zip(childQueues).map((i, q) => q(i))
-      val programs = weightedPrograms.map(_.program)
-      val subtermWeight = weightedPrograms.map(_.weight).sum
-      Some(SubtermCandidate(subtermIndices, programs, subtermWeight))
-    } else None
+  // def getStartIndices(qIndex: Int, qLen: Int, numChildren: Int): List[Int] = {
+  //   val prefix = List.fill(qIndex)(0)
+  //   val suffix = List.fill(numChildren - qIndex - 1)(0)
+  //   return prefix ++ (qLen - 1 :: suffix)
+  // }
+
+  def getPartialCandidate(
+    subtermIndices: List[Int],
+    subtermPermissions: List[Boolean],
+  ): PartialCandidate = {
+    val subterms = subtermIndices.zip(childQueues).map(
+      (i, q) => if (i < q.length) then Some(q(i)) else None)
+    PartialCandidate(subtermIndices, subtermPermissions, subterms)
   }
 
   def recieveProgram(newProgram: WeightedProgram): Unit = {
@@ -95,7 +103,6 @@ class RuleEnumerator(
         val newCandidate = getSubtermCandidate(insertIndices)
         if (newCandidate.isDefined) {
           candidateQueue += newCandidate.get
-          explored += insertIndices
         }
       }
     }
@@ -145,9 +152,8 @@ class RuleEnumerator(
       val retCandidate = candidateQueue.dequeue()
       for (nextIndices <- getNextCandidateIndices(retCandidate.indices)) {
         val nextCandidate = getSubtermCandidate(nextIndices)
-        if (nextCandidate.isDefined && !explored.contains(nextIndices)) {
+        if (nextCandidate.isDefined) {
           candidateQueue += nextCandidate.get
-          explored += nextIndices
         }
       }
       candidateToResult(retCandidate)
