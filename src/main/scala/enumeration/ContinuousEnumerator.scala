@@ -30,7 +30,6 @@ case class RuleEnumeratorResult(
 case class PartialCandidate(
     indices: List[Int],
     permissions: List[Boolean],
-    programs: List[Option[WeightedProgram]],
 ) 
 
 case class SubtermCandidate(
@@ -56,54 +55,14 @@ class RuleEnumerator(
   val childQueues = rule.childTypes.map(_ => ArrayBuffer[WeightedProgram]())
   val zeroList = List.fill(rule.childTypes.length)(0)
   val completePermissions = List.fill(rule.childTypes.length)(true)
-  val noneList = List.fill[Option[WeightedProgram]](rule.childTypes.length)(None)
-  val partialCandidates = ArrayBuffer[PartialCandidate](PartialCandidate(zeroList, completePermissions, noneList))
+  var partialCandidates = ArrayBuffer[PartialCandidate](PartialCandidate(zeroList, completePermissions))
   val candidateQueue = PriorityQueue.empty[SubtermCandidate]
 
-  // handle terminals
-
-  // val candidateQueue = {
-  //   val terminalCandidate = getTerminalCandidate()
-  //   terminalCandidate match
-  //     case None                   => PriorityQueue.empty[SubtermCandidate]
-  //     case Some(subtermCandidate) => {
-  //       PriorityQueue(subtermCandidate)
-  //     }
-  // }
-
-  // def getTerminalCandidate(): Option[SubtermCandidate] = {
-  //   if (rule.childTypes.length == 0)
-  //   then Some(SubtermCandidate(List[Int](), List[Boolean](), List[ASTNode](), 0.0))
-  //   else None
-  // }
-
-  // def getStartIndices(qIndex: Int, qLen: Int, numChildren: Int): List[Int] = {
-  //   val prefix = List.fill(qIndex)(0)
-  //   val suffix = List.fill(numChildren - qIndex - 1)(0)
-  //   return prefix ++ (qLen - 1 :: suffix)
-  // }
-
-  def getPartialCandidate(
-    subtermIndices: List[Int],
-    subtermPermissions: List[Boolean],
-  ): PartialCandidate = {
-    val subterms = subtermIndices.zip(childQueues).map(
-      (i, q) => if (i < q.length) then Some(q(i)) else None)
-    PartialCandidate(subtermIndices, subtermPermissions, subterms)
-  }
 
   def recieveProgram(newProgram: WeightedProgram): Unit = {
     for (((q, cType), i) <- childQueues.zip(rule.childTypes).zipWithIndex) {
       if (cType.equals(newProgram.program.nodeType)) {
         q += newProgram
-        val zeros = List.fill(rule.childTypes.length)(0)
-        val insertIndices = zeros.zipWithIndex.map((el, idx) =>
-          if idx == i then q.length - 1 else el
-        )
-        val newCandidate = getSubtermCandidate(insertIndices)
-        if (newCandidate.isDefined) {
-          candidateQueue += newCandidate.get
-        }
       }
     }
   }
@@ -112,8 +71,18 @@ class RuleEnumerator(
     l.zipWithIndex.map((el, i) => if i == idx then el + 1 else el)
   }
 
-  def getNextCandidateIndices(curIndices: List[Int]): List[List[Int]] = {
-    curIndices.zipWithIndex.map((_, i) => tickAtIdx(curIndices, i))
+  def maskAtIdx(l: List[Boolean], idx: Int): List[Boolean] = {
+    l.zipWithIndex.map((el, i) => idx <= i)
+  }
+
+
+  def getNextPartialCandidates(candidate: SubtermCandidate): List[PartialCandidate] = {
+    val newPerms = candidate.indices.zipWithIndex.map((_, i) => candidate.indices.zipWithIndex.map((_, j) => i <= j))
+    val newIndices = candidate.indices.zipWithIndex.map((_, i) => tickAtIdx(candidate.indices, i))
+    assert(newPerms.length == newIndices.length)
+    assert(newPerms.length == candidate.permissions.length)
+    val allPartials = newIndices.zip(newPerms).map((idxs, perms) => PartialCandidate(idxs, perms))
+    allPartials.zip(candidate.permissions).filter((_, perm) => perm).map((candidate, _) => candidate)
   }
 
   def candidateToResult(candidate: SubtermCandidate): Option[RuleEnumeratorResult] = {
@@ -133,6 +102,7 @@ class RuleEnumerator(
 }
 
   def peek(): Option[RuleEnumeratorResult] = {
+    updatePartials()
     if (0 < candidateQueue.length)
       then {
       val nextCandidate = candidateQueue.head
@@ -146,15 +116,39 @@ class RuleEnumerator(
       else None
   }
 
+  def partitionPartialCandidates(): (ArrayBuffer[PartialCandidate], ArrayBuffer[SubtermCandidate]) = {
+    val nextCompleteCanidates = ArrayBuffer[SubtermCandidate]()
+    val nextPartialCandidates = ArrayBuffer[PartialCandidate]()
+    for (partial <- partialCandidates) {
+      val indicesWithQueues = partial.indices.zip(childQueues)
+      if (indicesWithQueues.forall((i, q) => i < q.length)) {
+        val subterms = indicesWithQueues.map((i, q) => q(i)) 
+        val programs = subterms.map(_.program)
+        val weight = subterms.map(_.weight).sum
+        val candidate = SubtermCandidate(partial.indices, partial.permissions, programs, weight)
+        nextCompleteCanidates += candidate
+      } else {
+        nextPartialCandidates += partial
+      }
+    }
+    (nextPartialCandidates, nextCompleteCanidates)
+  }
+
+  def updatePartials(): Unit = {
+    val (nextPartials, candidatesToAdd) = partitionPartialCandidates()
+    candidateQueue.addAll(candidatesToAdd)
+    partialCandidates = nextPartials
+  }
+
+
   def nextProgram(): Option[RuleEnumeratorResult] = {
+    updatePartials()
     if (0 < candidateQueue.length)
     then {
       val retCandidate = candidateQueue.dequeue()
-      for (nextIndices <- getNextCandidateIndices(retCandidate.indices)) {
-        val nextCandidate = getSubtermCandidate(nextIndices)
-        if (nextCandidate.isDefined) {
-          candidateQueue += nextCandidate.get
-        }
+      val nextPartials = getNextPartialCandidates(retCandidate)
+      for (partialCandidate <- nextPartials) {
+        partialCandidates += partialCandidate
       }
       candidateToResult(retCandidate)
     }

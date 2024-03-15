@@ -47,8 +47,10 @@ class ContEnumTests extends JUnitSuite {
         //val testFile = "src/test/benchmarks/easy/easy2.sl"
         //val testFile = "src/test/benchmarks/easy/easy3.sl"
         //val testFile = "src/test/benchmarks/string/phone-5.sl"
-        //val testFile = "src/test/benchmarks/string/stackoverflow10.sl"
-        val testFile = "src/test/benchmarks/string/stackoverflow3.sl"
+        //val testFile = "src/test/benchmarks/string/stackoverflow8.sl"
+        //val testFile = "src/test/benchmarks/string/initials.sl"
+        val testFile = "src/test/benchmarks/string/phone-6-long.sl"
+        //val testFile = "src/test/benchmarks/string/stackoverflow3.sl"
         //val testFile = "src/test/benchmarks/hackers-delight/hd-18.sl"
         val fileContents = scala.io.Source.fromFile(testFile).mkString
         val task = new SygusFileTask(fileContents)
